@@ -165,7 +165,7 @@ test('where takes a site path, and a blob URL only when it is pinned to a commit
 
   t.is(resolveWhere('https://github.com/playpip/pip-web/blob/main/ROADMAP.md'), null)
   t.is(resolveWhere(`https://github.com/playpip/pip-web/blob/${sha.slice(0, 7)}/ROADMAP.md`), null)
-  t.is(resolveWhere(`https://github.com/playpip/marketing/blob/${sha}/ROADMAP.md`), null)
+  t.is(resolveWhere(`https://github.com/playpip/cmo/blob/${sha}/ROADMAP.md`), null)
   t.is(resolveWhere('ROADMAP.md'), null)
 })
 

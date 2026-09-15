@@ -199,7 +199,7 @@ export interface Grade {
  * points of each other.
  *
  * - `ambiguous`: on the pricing kind, what the hand gets there and what the pot
- *   is charging sit inside {@link https://github.com/playpip/technology/issues/55
+ *   is charging sit inside {@link https://github.com/playpip/cto/issues/55
  *   the margin}, where calling and folding are worth the same to within a
  *   rounding. On the strength kind it is the two hands themselves: a favourite
  *   by less than four points is a coin flip, and a coin flip has no answer a

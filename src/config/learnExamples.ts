@@ -7,7 +7,7 @@ import { cardFromString, type Card } from '@/lib/poker/cards'
 //
 // They are illustrations of what a guide already says in prose, not practice.
 // Nothing here is generated, scored or remembered — see the Learn section's
-// dividing line in ../../marketing/strategy/monetisation.md ("words are free,
+// dividing line in ../../cmo/strategy/monetisation.md ("words are free,
 // feedback is paid").
 
 export type Outcome = 'a' | 'b' | 'split'
