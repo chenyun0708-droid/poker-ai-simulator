@@ -22,6 +22,8 @@ pnpm typecheck   # tsc --noEmit
 pnpm test        # AVA — the engine test suite
 pnpm test:all    # scripts/test.sh — format, types, lint, AVA, knip, audit
 pnpm sim         # difficulty simulation (scripts/sim.ts) — see below
+pnpm sim:cash-soak # deterministic 1,000-hand 6-max cash-session invariant soak
+pnpm sim:ai-levels # seeded behavioural benchmark across all five AI levels
 ```
 
 Before considering a change done: **`pnpm test:all` should pass** (it runs the format
@@ -46,6 +48,38 @@ pnpm sim garage --skill 0.4    # trial an AI skill without editing config
 It's Monte-Carlo-heavy — a venue takes ~2–4 minutes at n=50; high venues
 (more `iterations`) take longer. n=50 has roughly a ±7pp margin; use n≥200
 for numbers you'll quote.
+
+### The cash-session soak
+
+`pnpm sim:cash-soak` runs 1,000 hands at a fixed-blind, 100BB, six-seat cash
+table with one Hero and five AI. Every player automatically rebuys after busting.
+It uses a per-hand RNG derived from the CLI seed, so deck order, AI decisions and
+the complete session replay exactly after a hand-boundary snapshot.
+
+The soak checks action legality, hand termination, stacks, button rotation, pot
+settlement and rebuy-aware chip accounting after every hand. It also reports
+all-ins, side/split pots, rebuys and final stacks. It is an invariant and
+stability tool, not a claim about AI strength or cash win rate.
+
+```bash
+pnpm sim:cash-soak                         # 1,000 hands, seed 1
+pnpm sim:cash-soak -- --seed 7            # reproducible alternate session
+pnpm sim:cash-soak -- --hands 2000 --seed 7
+```
+
+Pass `--level 1` through `--level 5` to soak one named AI level. The level
+benchmark runs the same seed set through every level and reports ending stacks,
+rebuys, VPIP-like participation, aggression, showdowns and action distribution:
+
+```bash
+pnpm sim:cash-soak -- --level 5 --seed 7
+pnpm sim:ai-levels
+pnpm sim:ai-levels -- --sessions 3 --hands 300 --seed 41
+```
+
+The benchmark checks that the five policies remain observably different; it
+does not rank real poker strength, and ending-chip variance must not be presented
+as proof that Lv5 always beats Lv4.
 
 ## Testing (AVA)
 
