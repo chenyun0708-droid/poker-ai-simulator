@@ -10,6 +10,7 @@ import { venueById } from '@/config/venues'
 import { refuseSitDown } from '@/lib/sitDown'
 import { deviceId } from '@/lib/sync/client'
 import { dailyDateKey } from '@/lib/daily'
+import { takeCashGameSetup } from '@/lib/cashGameSetup'
 
 export function PlayClient() {
   const { venue: venueId } = useParams<{ venue: string }>()
@@ -55,10 +56,13 @@ export function PlayClient() {
       return
     }
 
-    useGame.getState().sitDown(venue, {
-      name: profile.name,
-      avatar: profile.avatar,
-    })
+    useGame
+      .getState()
+      .sitDown(
+        venue,
+        { name: profile.name, avatar: profile.avatar },
+        venue.cash ? (takeCashGameSetup(venue.id) ?? undefined) : undefined,
+      )
   }, [venueId, router])
 
   if (activeVenue?.id !== venueId) return <Splash />

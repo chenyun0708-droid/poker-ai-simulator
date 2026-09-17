@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next'
-import { Geist, Geist_Mono } from 'next/font/google'
+import localFont from 'next/font/local'
 import './globals.css'
 import { THEME_BOOT_SCRIPT, ThemeProvider } from '@/components/theme-provider'
 import { TEXT_SCALE_BOOT_SCRIPT, TextScaleProvider } from '@/components/text-scale-provider'
@@ -7,14 +7,13 @@ import { AppBoot } from '@/components/AppBoot'
 import { SyncConflictDialog } from '@/components/settings/SyncConflictDialog'
 import { UpdatePrompt } from '@/components/UpdatePrompt'
 
-const geistSans = Geist({
+const geistSans = localFont({
   variable: '--font-geist-sans',
-  subsets: ['latin'],
-})
-
-const geistMono = Geist_Mono({
-  variable: '--font-geist-mono',
-  subsets: ['latin'],
+  display: 'swap',
+  src: [
+    { path: './_fonts/Geist-400.woff', weight: '400', style: 'normal' },
+    { path: './_fonts/Geist-600.woff', weight: '600', style: 'normal' },
+  ],
 })
 
 // Anonymous, cookieless analytics (Umami). Baked in at build time and loaded
@@ -73,11 +72,7 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html
-      lang="en"
-      suppressHydrationWarning
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
+    <html lang="en" suppressHydrationWarning className={`${geistSans.variable} h-full antialiased`}>
       <body className="bg-background text-foreground min-h-full">
         {/* No-flash theme boot — inline from the server so it runs pre-paint
             (and React never sees a client-rendered script). */}

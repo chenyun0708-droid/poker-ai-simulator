@@ -22,12 +22,27 @@ const level = flagNumber('level', 3)
 if (level < 1 || level > 5) throw new Error('--level must be from 1 to 5')
 const skillLevel = level as AiSkillLevel
 const profile = profileForSkill({ tightness: 0.32, aggression: 0.5, bluff: 0.09 }, skillLevel)
+const mixed = process.argv.includes('--mixed')
+const mixedProfiles = ([1, 2, 3, 4, 5] as const).map((seatLevel) =>
+  profileForSkill({ tightness: 0.32, aggression: 0.5, bluff: 0.09 }, seatLevel),
+)
 const started = performance.now()
-const { snapshot } = runCashSoak(createCashSoakSession({ seed }), hands, profile)
+const { snapshot } = runCashSoak(
+  createCashSoakSession({ seed, aiProfiles: mixed ? mixedProfiles : undefined }),
+  hands,
+  profile,
+)
 const runtime = performance.now() - started
+const mixedLevelsRetained = snapshot.seats
+  .slice(1)
+  .every((seat, index) => seat.ai?.skillLevel === mixedProfiles[index].skillLevel)
 
 printSummary(snapshot, runtime)
-if (snapshot.stats.invariantFailures.length > 0 || snapshot.stats.handsPlayed !== hands)
+if (
+  snapshot.stats.invariantFailures.length > 0 ||
+  snapshot.stats.handsPlayed !== hands ||
+  (mixed && !mixedLevelsRetained)
+)
   process.exitCode = 1
 
 function printSummary(session: CashSoakSnapshot, runtimeMs: number): void {
@@ -35,7 +50,11 @@ function printSummary(session: CashSoakSnapshot, runtimeMs: number): void {
   console.log('Cash soak complete')
   console.log(`hands played: ${stats.handsPlayed}`)
   console.log(`seed: ${session.seed}`)
-  console.log(`level: Lv${skillLevel} ${skillConfigForLevel(skillLevel).label}`)
+  console.log(
+    mixed
+      ? 'levels: mixed Lv1/Lv2/Lv3/Lv4/Lv5'
+      : `level: Lv${skillLevel} ${skillConfigForLevel(skillLevel).label}`,
+  )
   console.log(`rebuys: ${stats.rebuys}`)
   console.log(`Hero rebuys: ${stats.heroRebuys}`)
   console.log(`AI rebuys: ${stats.aiRebuys}`)
@@ -55,6 +74,7 @@ function printSummary(session: CashSoakSnapshot, runtimeMs: number): void {
   )
   console.log(`final stacks: ${session.seats.map((seat) => `${seat.id}=${seat.stack}`).join(', ')}`)
   console.log(`runtime: ${(runtimeMs / 1000).toFixed(2)}s`)
+  if (mixed) console.log(`seat levels retained: ${mixedLevelsRetained ? 'yes' : 'NO'}`)
   console.log(`detected invariant failures: ${stats.invariantFailures.length}`)
   for (const failure of stats.invariantFailures) console.log(`  - ${failure}`)
 }

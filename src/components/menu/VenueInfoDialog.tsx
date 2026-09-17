@@ -16,6 +16,16 @@ import type { Character } from '@/config/cast'
 import { FORMAT_LABELS, VENUES, type Venue } from '@/config/venues'
 import { useMoney } from '@/lib/useMoney'
 import { cn } from '@/lib/utils'
+import { useState } from 'react'
+import { characterById, draftCast } from '@/config/cast'
+import {
+  cashAiProfile,
+  cashSkillLabel,
+  createCashGameSetup,
+  type CashGameSetup,
+} from '@/lib/cashGameSetup'
+import type { AiSkillLevel } from '@/lib/poker/ai/skill'
+import { styleFor } from '@/config/opponents'
 
 /** Difficulty read derived from the venue's actual AI profile. */
 function venueDifficulty(venue: Venue): { level: 1 | 2 | 3 | 4 | 5; label: string; blurb: string } {
@@ -95,11 +105,35 @@ export function VenueInfoDialog({
   challenger?: Character
   playable: boolean
   onOpenChange: (open: boolean) => void
-  onPlay: (venue: Venue) => void
+  onPlay: (venue: Venue, cashSetup?: CashGameSetup) => void
 }) {
-  const money = useMoney()
   if (!venue) return <Dialog open={false} onOpenChange={onOpenChange} />
 
+  return (
+    <VenueInfoDialogContent
+      key={venue.id}
+      {...{ venue, challenger, playable, onOpenChange, onPlay }}
+    />
+  )
+}
+
+function VenueInfoDialogContent({
+  venue,
+  challenger,
+  playable,
+  onOpenChange,
+  onPlay,
+}: {
+  venue: Venue
+  challenger?: Character
+  playable: boolean
+  onOpenChange: (open: boolean) => void
+  onPlay: (venue: Venue, cashSetup?: CashGameSetup) => void
+}) {
+  const money = useMoney()
+  const [cashSetup, setCashSetup] = useState(() =>
+    venue.cash ? createCashGameSetup(venue, draftCast(venue, 5)) : null,
+  )
   const difficulty = venueDifficulty(venue)
   const rung = VENUES.findIndex((v) => v.id === venue.id) + 1
   const note = formatNote(venue)
@@ -198,6 +232,56 @@ export function VenueInfoDialog({
             </section>
           )}
 
+          {cashSetup && (
+            <section>
+              <p className="mb-2 text-xs uppercase tracking-[0.15em] text-muted-foreground">
+                AI opponents
+              </p>
+              <div className="flex flex-col gap-2">
+                {cashSetup.aiSeats.map((seat, index) => {
+                  const character = characterById(seat.characterId)!
+                  const style = styleFor(cashAiProfile(venue, character, seat.level))
+                  return (
+                    <label
+                      key={seat.characterId}
+                      className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-xl border border-foreground/10 bg-foreground/[0.02] p-2.5"
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-medium">
+                          Seat {index + 1} · {character.name}
+                        </span>
+                        <span className="block text-xs text-muted-foreground">{style}</span>
+                      </span>
+                      <select
+                        aria-label={`${character.name} skill level`}
+                        value={seat.level}
+                        onChange={(event) => {
+                          const level = Number(event.target.value) as AiSkillLevel
+                          setCashSetup((current) => ({
+                            ...current!,
+                            aiSeats: current!.aiSeats.map((item, seatIndex) =>
+                              seatIndex === index ? { ...item, level } : item,
+                            ),
+                          }))
+                        }}
+                        className="rounded-lg border border-foreground/15 bg-background px-2 py-1.5 text-xs"
+                      >
+                        {([1, 2, 3, 4, 5] as const).map((level) => (
+                          <option key={level} value={level}>
+                            {cashSkillLabel(level)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )
+                })}
+              </div>
+              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                Levels are locked once this six-seat session starts.
+              </p>
+            </section>
+          )}
+
           {/* structure */}
           <section>
             <p className="mb-1.5 text-xs uppercase tracking-[0.15em] text-muted-foreground">
@@ -206,7 +290,7 @@ export function VenueInfoDialog({
             <div className="flex flex-col">
               <InfoRow label="Buy-in" value={venue.freeroll ? 'Free' : money(venue.buyIn)} />
               <InfoRow label="Starting stack" value={money(venue.startingStack ?? venue.buyIn)} />
-              <InfoRow label="Seats" value={`${venue.seats} players`} />
+              <InfoRow label="Seats" value={`${cashSetup ? 6 : venue.seats} players`} />
               <InfoRow
                 label="Blinds"
                 value={
@@ -227,7 +311,7 @@ export function VenueInfoDialog({
               this dialog and playing is a deliberate second tap. */}
           {playable ? (
             <button
-              onClick={() => onPlay(venue)}
+              onClick={() => onPlay(venue, cashSetup ?? undefined)}
               className="w-full rounded-2xl bg-primary px-6 py-3 font-semibold text-primary-foreground transition hover:bg-primary/90 active:scale-[0.98]"
             >
               {venue.freeroll

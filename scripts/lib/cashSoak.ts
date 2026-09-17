@@ -30,6 +30,7 @@ export interface CashSoakSeat {
   id: string
   name: string
   stack: number
+  ai?: AiProfile
 }
 
 export interface CashSoakStats {
@@ -80,6 +81,7 @@ export interface CashSoakOptions {
   smallBlind?: number
   bigBlind?: number
   buyIn?: number
+  aiProfiles?: readonly AiProfile[]
 }
 
 export interface CashSoakRun {
@@ -90,10 +92,13 @@ export interface CashSoakRun {
 export function createCashSoakSession(options: CashSoakOptions = {}): CashSoakSnapshot {
   const bigBlind = options.bigBlind ?? CASH_SOAK_BIG_BLIND
   const buyIn = options.buyIn ?? bigBlind * 100
+  if (options.aiProfiles && options.aiProfiles.length !== CASH_SOAK_SEATS - 1)
+    throw new Error('A mixed cash soak needs five AI profiles')
   const seats = Array.from({ length: CASH_SOAK_SEATS }, (_, i) => ({
     id: i === 0 ? HERO_ID : `ai${i}`,
     name: i === 0 ? 'Hero' : `AI ${i}`,
     stack: buyIn,
+    ...(i > 0 && options.aiProfiles ? { ai: options.aiProfiles[i - 1] } : {}),
   }))
   return {
     version: 1,
@@ -175,10 +180,11 @@ function playHand(session: CashSoakSnapshot, profile: AiProfile): HandState {
     const legal = legalActions(hand)
     invariant(legal !== null, 'unfinished hand has no legal actor')
     const before = hand
-    const action = decideAction(hand, profile, rng)
-    assertLegalAction(action, legal)
     const actor = hand.players[hand.toActIndex]
     invariant(actor !== undefined, 'legal action has no actor')
+    const seat = session.seats.find((candidate) => candidate.id === actor.id)
+    const action = decideAction(hand, seat?.ai ?? profile, rng)
+    assertLegalAction(action, legal)
     recordAction(session.stats, action)
     if (
       hand.street === 'preflop' &&

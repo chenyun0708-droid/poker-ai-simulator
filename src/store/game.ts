@@ -45,6 +45,7 @@ import {
 } from '@/lib/daily'
 import { formatChips } from '@/lib/useMoney'
 import { useProfile } from './profile'
+import { cashAiProfile, type CashGameSetup } from '@/lib/cashGameSetup'
 
 export interface SeatMeta {
   id: string
@@ -162,7 +163,11 @@ interface GameState {
    * table's cash-out P/L (which must count rebuys, not just the first buy-in). */
   cashInvested: number
 
-  sitDown: (venue: Venue, human: { name: string; avatar: AvatarSpec }) => void
+  sitDown: (
+    venue: Venue,
+    human: { name: string; avatar: AvatarSpec },
+    cashSetup?: CashGameSetup,
+  ) => void
   /** Rebuild an interrupted table from its snapshot (no buy-in taken). */
   resumeTable: (venue: Venue, snapshot: TableSnapshot) => void
   act: (action: Action) => void
@@ -986,7 +991,7 @@ export const useGame = create<GameState>((set, get) => {
     talk: null,
     cashInvested: 0,
 
-    sitDown: (venue, human) => {
+    sitDown: (venue, human, cashSetup) => {
       clearTimers()
       const stack = venue.startingStack ?? venue.buyIn
       heroLowTide = stack
@@ -1001,21 +1006,25 @@ export const useGame = create<GameState>((set, get) => {
       if (venue.daily && dailyDay) {
         useProfile.getState().recordDailyStart(dailyDay, dailyNumber(dailyDay))
       }
-      const aiCount = venue.seats - 1
+      const aiCount = cashSetup ? 5 : venue.seats - 1
       // A challenge table seats no draw: the one chair opposite belongs to the
       // standing challenger, derived here from the persisted profile rather
       // than handed over by the card, so a deep link or a reload seats the
       // same face the home screen offered (see lib/challenge).
       const challenger = challengerFor(venue, useProfile.getState())
-      const cast = challenger
-        ? [challenger]
-        : draftCast(
-            venue,
-            aiCount,
-            dailyBase !== null ? mulberry32(dailyBase ^ 0x9e3779b9) : undefined,
-          )
+      const configuredCast = cashSetup?.aiSeats.map((seat) => characterById(seat.characterId))
+      const cast = configuredCast?.every((character) => character !== undefined)
+        ? configuredCast
+        : challenger
+          ? [challenger]
+          : draftCast(
+              venue,
+              aiCount,
+              dailyBase !== null ? mulberry32(dailyBase ^ 0x9e3779b9) : undefined,
+            )
       const aiSeats: SeatMeta[] = cast.map((ch, i) => {
-        const ai = profileFor(venue, ch)
+        const configured = cashSetup?.aiSeats[i]
+        const ai = configured ? cashAiProfile(venue, ch, configured.level) : profileFor(venue, ch)
         return {
           id: `ai${i}`,
           name: ch.name,
