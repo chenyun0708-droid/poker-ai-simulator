@@ -12,7 +12,15 @@ import { sound } from '@/lib/sound'
 import { SectionScreen } from './SectionScreen'
 import { CategoryArt } from './CategoryArt'
 import { VenueInfoDialog } from './VenueInfoDialog'
+import { CashGameSetupDialog } from './CashGameSetupDialog'
 import { useRequireProfile } from './useRequireProfile'
+import {
+  CASH_PRACTICE_AI_COUNT,
+  cashPracticeVenue,
+  createCashSessionSetup,
+  saveCashSessionSetup,
+  type CashSessionSetup,
+} from '@/lib/cashSetup'
 
 /**
  * The Rail — cash / ring tables. Each stake is a card in its own colour, the
@@ -25,6 +33,8 @@ export function RailBrowser() {
   const router = useRouter()
   const spendable = useSpendableRoll()
   const [infoRoom, setInfoRoom] = useState<Venue | null>(null)
+  const [setupRoom, setSetupRoom] = useState<Venue | null>(null)
+  const [cashSetup, setCashSetup] = useState<CashSessionSetup | null>(null)
 
   if (!ready) return <Splash />
 
@@ -42,7 +52,7 @@ export function RailBrowser() {
             playable={spendable >= room.buyIn}
             onOpen={() => {
               sound.play('tap')
-              setInfoRoom(room)
+              setInfoRoom(cashPracticeVenue(room))
             }}
           />
         ))}
@@ -59,7 +69,25 @@ export function RailBrowser() {
         playable={infoRoom ? spendable >= infoRoom.buyIn : false}
         onOpenChange={(o) => !o && setInfoRoom(null)}
         onPlay={(room) => {
+          setInfoRoom(null)
+          setSetupRoom(room)
+          setCashSetup(createCashSessionSetup(room))
+        }}
+      />
+
+      <CashGameSetupDialog
+        venue={setupRoom}
+        setup={cashSetup}
+        onSetupChange={setCashSetup}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSetupRoom(null)
+            setCashSetup(null)
+          }
+        }}
+        onStart={(room, setup) => {
           sound.play('call')
+          saveCashSessionSetup(setup)
           router.push(`/play/${room.id}`)
         }}
       />
@@ -115,7 +143,7 @@ function RailCard({
         <div className="flex flex-1 flex-col p-3">
           <h3 className="font-semibold">{room.name}</h3>
           <p className="mt-0.5 text-sm tabular-nums text-muted-foreground">
-            {room.seats}-handed · 100bb deep
+            {CASH_PRACTICE_AI_COUNT + 1}-handed · 100bb deep
           </p>
           <p className="mt-2 text-base font-semibold tabular-nums">
             {playable ? `Sit — ${money(room.buyIn)}` : `Need ${money(room.buyIn)}`}

@@ -12,8 +12,14 @@ import type { Rng } from '../cards'
 import { legalActions, potSize, type Action, type HandState } from '../engine'
 import { estimateEquity } from '../equity'
 import { holeStrength } from '../range'
+import {
+  type AiPersonality,
+  type AiSkillConfig,
+  type AiSkillLevel,
+  skillConfigForLevel,
+} from './skill'
 
-export interface AiProfile {
+export interface AiProfile extends AiPersonality {
   /** Loose (0) → nitty (1). Raises the equity needed to continue. */
   tightness: number
   /** Passive (0) → aggressive (1). Governs raise frequency and bet sizing. */
@@ -28,6 +34,8 @@ export interface AiProfile {
    * exploitable mistakes rather than a personality shift. Defaults to 1.
    */
   skill?: number
+  /** Named decision-quality bundle. When absent, legacy `skill` behaviour is preserved. */
+  skillLevel?: AiSkillLevel
 }
 
 const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, n))
@@ -89,8 +97,9 @@ function sizedRaise(
   maxRaiseTo: number,
   rng: Rng,
   aggression = 0.5,
+  jitterWidth = 0.3,
 ): number {
-  const jitter = 0.85 + rng() * 0.3 // ±15%
+  const jitter = 1 - jitterWidth / 2 + rng() * jitterWidth
   if (state.street === 'preflop' && state.currentBet > 0) {
     const multiple = 2.4 + aggression * 0.6 // 2.4x passive → 3x aggressive
     const target = Math.round(state.currentBet * multiple * jitter)
@@ -128,21 +137,30 @@ export function decideAction(state: HandState, profile: AiProfile, rng: Rng = Ma
     rng,
   })
 
-  // Unskilled players misread their hand strength. The noisy estimate feeds
+  const decisionSkill = resolveDecisionSkill(profile)
+  const levelled = profile.skillLevel !== undefined
+
+  // Less-skilled players misread their hand strength. The noisy estimate feeds
   // every decision below, so mistakes compound naturally: missed value bets,
   // bad calls, folded winners.
-  const skill = clamp(profile.skill ?? 1, 0, 1)
-  const misread = (rng() - 0.5) * (1 - skill) * 0.6
+  const misread = (rng() - 0.5) * decisionSkill.equityNoise
   const equity = clamp(trueEquity + misread, 0.02, 0.98)
 
   const toCall = legal.callAmount
   const pot = potSize(state)
   const potOdds = toCall > 0 ? toCall / (pot + toCall) : 0
+  const oddsNoise = levelled ? (rng() - 0.5) * (1 - decisionSkill.potOddsAwareness) * 0.18 : 0
+  const perceivedPotOdds = clamp(potOdds + oddsNoise - decisionSkill.callBias, 0, 1)
   const roll = rng()
 
   // Out of position (players still to act behind us) we tighten up and bluff
   // less — a steal into a live field is far likelier to run into a real hand.
-  const posPressure = positionalPressure(state, player)
+  const posPressure = positionalPressure(state, player) * decisionSkill.positionAwareness
+  const effectiveStack = Math.min(
+    player.stack,
+    ...opponents.map((opponent) => opponent.stack + opponent.committedThisStreet),
+  )
+  const spr = effectiveStack / Math.max(pot, state.bigBlind)
 
   // Preflop, gate voluntary chips on starting-hand quality. Raw equity vs two
   // random cards flatters junk — 2-3o still wins ~a third of the time heads-up —
@@ -197,12 +215,13 @@ export function decideAction(state: HandState, profile: AiProfile, rng: Rng = Ma
   // spots move, which is where the defect was.
   const fairShare = 1 / (opponents.length + 1)
   const misjudged = clamp(preStrength + misread, 0, 1)
+  const valuePremium = fairShare * (1 - decisionSkill.valueDiscipline) * 0.18
   const raiseValue = preflop
     ? misjudged >= PREFLOP_RAISE_STRENGTH
-    : equity > fairShare * POSTFLOP_GATE.raiseValue
+    : equity > fairShare * POSTFLOP_GATE.raiseValue + valuePremium
   const raiseThin = preflop
     ? misjudged >= PREFLOP_RAISE_THIN_STRENGTH
-    : equity > fairShare * POSTFLOP_GATE.raiseThin
+    : equity > fairShare * POSTFLOP_GATE.raiseThin + valuePremium
 
   // --- unbet pot: check or lead out --------------------------------------
   if (toCall === 0) {
@@ -211,17 +230,27 @@ export function decideAction(state: HandState, profile: AiProfile, rng: Rng = Ma
     const strongEnoughToLead = preflop
       ? misjudged >= PREFLOP_RAISE_STRENGTH
       : equity > fairShare * POSTFLOP_GATE.lead
-    const wantsValue = strongEnoughToLead && roll < 0.35 + profile.aggression * 0.55
+    const wantsValue =
+      strongEnoughToLead &&
+      roll < (0.35 + profile.aggression * 0.55) * (0.65 + decisionSkill.valueDiscipline * 0.35)
     // The bluff ceiling scales with the field for the same reason, and it is the
     // half that was quietly wrong in the other direction: four-handed, "under
     // 0.4" is almost every holding, so the bot fired its full bluff frequency
     // with hands that were good for the pot size and called it a bluff.
-    const wantsBluff =
-      equity < fairShare * POSTFLOP_GATE.bluffCeiling &&
-      !trashPreflop &&
-      roll < profile.bluff * (1 - posPressure * 0.5)
+    const bluffChance =
+      profile.bluff *
+      (0.55 + decisionSkill.bluffDiscipline * 0.45) *
+      (1 - posPressure * (0.25 + decisionSkill.bluffDiscipline * 0.25))
+    const timedBluff = equity < fairShare * POSTFLOP_GATE.bluffCeiling && roll < bluffChance
+    const mistimedBluff =
+      levelled &&
+      rng() < profile.bluff * (1 - decisionSkill.bluffDiscipline) * decisionSkill.actionNoise
+    const wantsBluff = !trashPreflop && (timedBluff || mistimedBluff)
     if ((wantsValue || wantsBluff) && (legal.canBet || legal.canRaise)) {
-      const fraction = wantsValue ? 0.55 + profile.aggression * 0.25 : 0.5
+      // Weak sizing is noisy around the same sane pot fractions; it never turns
+      // into an arbitrary shove because `sizedRaise` remains legally clamped.
+      const sizingError = levelled ? (rng() - 0.5) * (1 - decisionSkill.valueDiscipline) * 0.3 : 0
+      const fraction = (wantsValue ? 0.55 + profile.aggression * 0.25 : 0.5) + sizingError
       return {
         type: legal.canBet ? 'bet' : 'raise',
         amount: sizedRaise(
@@ -231,6 +260,7 @@ export function decideAction(state: HandState, profile: AiProfile, rng: Rng = Ma
           legal.maxRaiseTo,
           rng,
           profile.aggression,
+          decisionSkill.sizingJitter,
         ),
       }
     }
@@ -240,13 +270,22 @@ export function decideAction(state: HandState, profile: AiProfile, rng: Rng = Ma
   // --- facing a bet ------------------------------------------------------
   // Muck preflop junk to any bet rather than peel with 2-3 — no price is good
   // enough for a hand a real player never entered the pot with.
+  if (
+    profile.skillLevel !== undefined &&
+    rng() < decisionSkill.decisionErrorRate &&
+    legal.canCall &&
+    legal.callAmount < player.stack
+  ) {
+    return rng() < 0.7 + decisionSkill.callBias ? { type: 'call' } : { type: 'fold' }
+  }
+
   if (trashPreflop) {
     return { type: 'fold' }
   }
 
   // Unskilled players also just give up under pressure — the exploitable
   // tell a casual human can actually find and use.
-  if (skill < 1 && rng() < (1 - skill) * 0.35) {
+  if (rng() < decisionSkill.decisionErrorRate) {
     return { type: 'fold' }
   }
 
@@ -285,35 +324,105 @@ export function decideAction(state: HandState, profile: AiProfile, rng: Rng = Ma
   // available, which folded aces under the gun. Shrink them with the field so
   // "tight" and "out of position" mean the same thing at every table size.
   const fieldScale = 2 / (opponents.length + 1) // heads-up 1, six-handed 1/3
-  const continueThreshold = potOdds * oddsFactor + (tightnessTax + posPressure * 0.06) * fieldScale
+  // Deep stacks punish marginal one-pair commitments; low SPR rewards committing
+  // strong equity. Only the skill bundle scales this read — personality still
+  // determines how tight/aggressive that player is within it.
+  const stackDepthAdjustment =
+    (spr > 8 ? 0.025 : spr < 1.5 ? -0.018 : 0) * decisionSkill.stackDepthAwareness
+  const decisionNoise = levelled ? (rng() - 0.5) * decisionSkill.actionNoise : 0
+  const continueThreshold =
+    perceivedPotOdds * oddsFactor +
+    (tightnessTax + posPressure * 0.06) * fieldScale +
+    stackDepthAdjustment +
+    decisionNoise
 
   if (equity < continueThreshold) {
     // Usually fold; occasionally bluff-raise, or peel one cheaply when close.
     if (legal.canRaise && roll < profile.bluff * 0.5) {
       return {
         type: 'raise',
-        amount: sizedRaise(state, 0.6, legal.minRaiseTo, legal.maxRaiseTo, rng, profile.aggression),
+        amount: sizedRaise(
+          state,
+          0.6,
+          legal.minRaiseTo,
+          legal.maxRaiseTo,
+          rng,
+          profile.aggression,
+          decisionSkill.sizingJitter,
+        ),
       }
     }
     const cheap = toCall <= pot * 0.15
-    if (legal.canCall && cheap && equity > potOdds * 0.85 && roll < 0.5) {
+    if (legal.canCall && cheap && equity > perceivedPotOdds * 0.85 && roll < 0.5) {
       return { type: 'call' }
     }
     return { type: 'fold' }
   }
 
   // Strong enough to continue: value-raise the strongest holdings.
-  if (raiseValue && legal.canRaise && roll < 0.45 + profile.aggression * 0.5) {
+  if (
+    raiseValue &&
+    legal.canRaise &&
+    roll < (0.45 + profile.aggression * 0.5) * (0.7 + decisionSkill.valueDiscipline * 0.3)
+  ) {
     return {
       type: 'raise',
-      amount: sizedRaise(state, 0.7, legal.minRaiseTo, legal.maxRaiseTo, rng, profile.aggression),
+      amount: sizedRaise(
+        state,
+        0.7 + (spr < 2 ? 0.12 * decisionSkill.stackDepthAwareness : 0),
+        legal.minRaiseTo,
+        legal.maxRaiseTo,
+        rng,
+        profile.aggression,
+        decisionSkill.sizingJitter,
+      ),
     }
   }
   if (raiseThin && legal.canRaise && roll < profile.aggression * 0.4) {
     return {
       type: 'raise',
-      amount: sizedRaise(state, 0.5, legal.minRaiseTo, legal.maxRaiseTo, rng, profile.aggression),
+      amount: sizedRaise(
+        state,
+        0.5,
+        legal.minRaiseTo,
+        legal.maxRaiseTo,
+        rng,
+        profile.aggression,
+        decisionSkill.sizingJitter,
+      ),
     }
   }
   return legal.canCall ? { type: 'call' } : { type: 'check' }
+}
+
+type DecisionSkill = Pick<
+  AiSkillConfig,
+  | 'equityNoise'
+  | 'potOddsAwareness'
+  | 'positionAwareness'
+  | 'stackDepthAwareness'
+  | 'bluffDiscipline'
+  | 'valueDiscipline'
+  | 'sizingJitter'
+  | 'decisionErrorRate'
+  | 'actionNoise'
+  | 'callBias'
+>
+
+/** Old profiles keep their former scalar behaviour until explicitly levelled. */
+function resolveDecisionSkill(profile: AiProfile): DecisionSkill {
+  if (profile.skillLevel !== undefined) return skillConfigForLevel(profile.skillLevel)
+  const legacy = clamp(profile.skill ?? 1, 0, 1)
+  return {
+    equityNoise: (1 - legacy) * 0.6,
+    potOddsAwareness: 1,
+    positionAwareness: 1,
+    stackDepthAwareness: 0,
+    bluffDiscipline: 1,
+    valueDiscipline: 1,
+    sizingJitter: 0.3,
+    decisionErrorRate: (1 - legacy) * 0.35,
+    actionNoise: 0,
+    callBias: 0,
+  }
 }

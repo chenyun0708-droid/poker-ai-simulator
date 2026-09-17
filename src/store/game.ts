@@ -44,6 +44,7 @@ import {
   type CountedRng,
 } from '@/lib/daily'
 import { formatChips } from '@/lib/useMoney'
+import { rebuyCashAiSeats, resolveCashOpponents, type CashSessionSetup } from '@/lib/cashSetup'
 import { useProfile } from './profile'
 
 export interface SeatMeta {
@@ -162,7 +163,11 @@ interface GameState {
    * table's cash-out P/L (which must count rebuys, not just the first buy-in). */
   cashInvested: number
 
-  sitDown: (venue: Venue, human: { name: string; avatar: AvatarSpec }) => void
+  sitDown: (
+    venue: Venue,
+    human: { name: string; avatar: AvatarSpec },
+    cashSetup?: CashSessionSetup,
+  ) => void
   /** Rebuild an interrupted table from its snapshot (no buy-in taken). */
   resumeTable: (venue: Venue, snapshot: TableSnapshot) => void
   act: (action: Action) => void
@@ -805,9 +810,7 @@ export const useGame = create<GameState>((set, get) => {
     const venue = get().venue!
     const tableStack = venue.startingStack ?? venue.buyIn
     const humanAlive = (stackById.get(HUMAN_ID) ?? 0) > 0
-    const rebought = nextSeats.map((s) =>
-      !s.isHuman && s.stack <= 0 ? { ...s, stack: tableStack } : s,
-    )
+    const rebought = rebuyCashAiSeats(nextSeats, tableStack)
     const newAwards = grantEarnedAwards(hand, venue, heroWon, false, false, 0)
 
     if (!humanAlive) {
@@ -986,7 +989,7 @@ export const useGame = create<GameState>((set, get) => {
     talk: null,
     cashInvested: 0,
 
-    sitDown: (venue, human) => {
+    sitDown: (venue, human, cashSetup) => {
       clearTimers()
       const stack = venue.startingStack ?? venue.buyIn
       heroLowTide = stack
@@ -1002,20 +1005,23 @@ export const useGame = create<GameState>((set, get) => {
         useProfile.getState().recordDailyStart(dailyDay, dailyNumber(dailyDay))
       }
       const aiCount = venue.seats - 1
+      const configuredOpponents = cashSetup ? resolveCashOpponents(venue, cashSetup) : null
       // A challenge table seats no draw: the one chair opposite belongs to the
       // standing challenger, derived here from the persisted profile rather
       // than handed over by the card, so a deep link or a reload seats the
       // same face the home screen offered (see lib/challenge).
       const challenger = challengerFor(venue, useProfile.getState())
-      const cast = challenger
-        ? [challenger]
-        : draftCast(
-            venue,
-            aiCount,
-            dailyBase !== null ? mulberry32(dailyBase ^ 0x9e3779b9) : undefined,
-          )
+      const cast = configuredOpponents
+        ? configuredOpponents.map((opponent) => opponent.character)
+        : challenger
+          ? [challenger]
+          : draftCast(
+              venue,
+              aiCount,
+              dailyBase !== null ? mulberry32(dailyBase ^ 0x9e3779b9) : undefined,
+            )
       const aiSeats: SeatMeta[] = cast.map((ch, i) => {
-        const ai = profileFor(venue, ch)
+        const ai = configuredOpponents?.[i]?.ai ?? profileFor(venue, ch)
         return {
           id: `ai${i}`,
           name: ch.name,

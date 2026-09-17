@@ -179,6 +179,15 @@ tournament bookkeeping (`recordVenueEntry`, `recordVenueResult`, `tournamentsEnt
 stats, tendencies and reads still accrue normally. See [venues.md](./venues.md) for the stakes
 ladder and why difficulty tracks the stake.
 
+Entering a Rail table through the lobby opens a six-max practice setup before the buy-in is
+taken. The five drafted cast opponents default to Lv2/Lv3/Lv3/Lv4/Lv3: one softer seat, one
+stronger seat and three regulars make a useful mixed table without dropping a first-time player
+straight into the highest setting. Each selector changes only `AiSkillLevel`; the character's
+tightness/aggression/bluff personality stays intact. Once seated the choices lock for the session.
+The complete per-seat `AiProfile` already lives on `SeatMeta`, so the existing `pip.table`
+snapshot carries every level through new hands, rebuys and refresh/resume without a profile
+schema change. Direct legacy table starts and every non-cash venue keep their existing profiles.
+
 ## The Daily Deal
 
 **One seeded tournament a day — everyone in the world who plays it gets the

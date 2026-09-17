@@ -89,6 +89,20 @@ equity + pot odds + a personality.
   "win %" read, so both sides model opponent ranges identically.
 - Difficulty scales per venue via the profile (see `config/venues.ts`).
 
+### `ai/skill.ts`
+
+Five named decision-quality bundles sit above the policy: Lv1 Beginner, Lv2
+Recreational, Lv3 Regular, Lv4 Strong Regular and Lv5 Elite. A level controls
+equity precision and iterations, pot-odds/position/stack-depth awareness,
+bluff/value discipline, sizing quality and decision noise. It is explicitly not
+a GTO claim.
+
+`AiPersonality` remains the independent style axis (`tightness`, `aggression`,
+`bluff`), so the same level can play as a nit, TAG, LAG or balanced opponent.
+`profileForSkill(personality, level)` combines the two. Existing venue profiles
+that only have the legacy scalar `skill` remain valid; `skillLevel` takes over
+only when a caller explicitly opts into a named level.
+
 ## Invariants worth preserving (and how they're tested)
 
 - **Chip conservation**: total chips are constant across a hand (verified over 40
