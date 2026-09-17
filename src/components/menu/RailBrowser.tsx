@@ -13,6 +13,7 @@ import { SectionScreen } from './SectionScreen'
 import { CategoryArt } from './CategoryArt'
 import { VenueInfoDialog } from './VenueInfoDialog'
 import { useRequireProfile } from './useRequireProfile'
+import { saveCashGameSetup } from '@/lib/cashGameSetup'
 
 /**
  * The Rail — cash / ring tables. Each stake is a card in its own colour, the
@@ -58,8 +59,9 @@ export function RailBrowser() {
         venue={infoRoom}
         playable={infoRoom ? spendable >= infoRoom.buyIn : false}
         onOpenChange={(o) => !o && setInfoRoom(null)}
-        onPlay={(room) => {
+        onPlay={(room, setup) => {
           sound.play('call')
+          if (setup) saveCashGameSetup(setup)
           router.push(`/play/${room.id}`)
         }}
       />
@@ -114,9 +116,7 @@ function RailCard({
         </div>
         <div className="flex flex-1 flex-col p-3">
           <h3 className="font-semibold">{room.name}</h3>
-          <p className="mt-0.5 text-sm tabular-nums text-muted-foreground">
-            {room.seats}-handed · 100bb deep
-          </p>
+          <p className="mt-0.5 text-sm tabular-nums text-muted-foreground">6-handed · 100bb deep</p>
           <p className="mt-2 text-base font-semibold tabular-nums">
             {playable ? `Sit — ${money(room.buyIn)}` : `Need ${money(room.buyIn)}`}
           </p>
